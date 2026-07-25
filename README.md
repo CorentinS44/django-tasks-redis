@@ -36,7 +36,7 @@ sequenceDiagram
     Backend-->>App: TaskResult (id, status=READY)
 
     Note over App,Worker: Task Execution
-    Worker->>Redis: XREADGROUP (consumer group)<br/>(blocks waiting for messages)
+    Worker->>Redis: XREADGROUP (consumer group)<br/>(own pending messages, then new ones)
     Redis-->>Worker: Message with task_id
     Worker->>Redis: HGET task data
     Redis-->>Worker: Task data
@@ -47,12 +47,12 @@ sequenceDiagram
     else Failure
         Worker->>Redis: HSET status=FAILED,<br/>errors, finished_at
     end
-    Worker->>Redis: XACK (acknowledge message)
+    Worker->>Redis: XACK + XDEL (acknowledge and reclaim)
 
     Note over App,Worker: Crash Recovery
-    Worker->>Redis: XAUTOCLAIM stale messages<br/>(claim_timeout exceeded)
-    Redis-->>Worker: Reclaimed messages
-    Worker->>Worker: Re-execute tasks
+    Worker->>Redis: XPENDING + XCLAIM stale messages<br/>(claim_timeout exceeded)
+    Redis-->>Worker: Messages reassigned to this consumer
+    Worker->>Worker: Re-execute tasks<br/>(up to REDIS_MAX_DELIVERIES)
 
     Note over App,Worker: Result Retrieval (Optional)
     App->>Backend: backend.get_result(task_id)
@@ -105,6 +105,7 @@ TASKS = {
 ```python
 from django.tasks import task
 
+
 @task
 def send_email(to: str, subject: str, body: str):
     # Send email logic here
@@ -140,17 +141,35 @@ TASKS = {
             # "REDIS_DB": 0,
             # "REDIS_PASSWORD": None,
             # "REDIS_SSL": False,
-
             # Behavior settings
-            "REDIS_RESULT_TTL": 604800,  # Result retention period (seconds), default 7 days
+            "REDIS_RESULT_TTL": 2592000,  # Result retention period (seconds), default 30 days
+            "REDIS_COMPLETED_TASK_TTL": 2592000,  # Retention once finished, defaults to REDIS_RESULT_TTL
             "REDIS_KEY_PREFIX": "django_tasks",  # Redis key prefix
             "REDIS_CONSUMER_GROUP": "django_tasks_workers",  # Consumer group name
             "REDIS_CLAIM_TIMEOUT": 300,  # Stale message claim timeout (seconds)
             "REDIS_BLOCK_TIMEOUT": 5000,  # XREADGROUP block timeout (milliseconds)
+            "REDIS_MAX_DELIVERIES": 5,  # Give up on a message after this many attempts (0 = never)
+            "REDIS_SCAN_BATCH_SIZE": 500,  # Tasks read per round trip when walking the index
         },
     },
 }
 ```
+
+### Delivery guarantees
+
+Tasks are delivered **at least once**. A worker that dies leaves its message
+pending; another worker reclaims it after `REDIS_CLAIM_TIMEOUT` and runs it
+again. Two consequences are worth planning for:
+
+- **`REDIS_CLAIM_TIMEOUT` must be longer than your longest task.** A task still
+  running after the timeout looks exactly like a dead worker at the queue
+  level, and will be reclaimed and executed a second time.
+- **Task functions should be idempotent.** A worker can die between finishing
+  the work and recording the result, in which case the task runs again.
+
+A message that keeps coming back is given up on after `REDIS_MAX_DELIVERIES`
+attempts: the task is marked FAILED with a `TaskAbandoned` error, so it shows up
+in the admin instead of being retried forever. Set it to `0` to disable the cap.
 
 ## Management Commands
 
@@ -167,9 +186,16 @@ Options:
   --continuous            Continuous mode (don't exit)
   --interval SECONDS      Polling interval (default: 1)
   --max-tasks N           Maximum tasks to process (0=unlimited)
-  --workers N             Number of worker threads (default: 1)
   --claim-interval SECS   Stale task claim interval (default: 60)
 ```
+
+A worker handles one task at a time. Run several processes to process more, each
+gets its own consumer in the group.
+
+In `--continuous` mode the worker waits on the streams for up to
+`REDIS_BLOCK_TIMEOUT` instead of polling, so `--interval` only applies when
+that wait is disabled (`REDIS_BLOCK_TIMEOUT: 0`). The block timeout also bounds
+how long a shutdown signal can take to be noticed.
 
 ### purge_completed_redis_tasks
 
@@ -191,9 +217,12 @@ Options:
 The package provides Django Admin integration for viewing and managing tasks:
 
 - View task list with status, priority, queue
-- Filter by status, queue, backend
-- Run selected tasks
-- Retry failed tasks
+- Search a task by id
+- Run selected tasks (requires the change permission)
+- Retry failed tasks (requires the change permission)
+- Delete tasks (requires the delete permission)
+
+The admin reads the `default` backend.
 
 ## HTTP Endpoints
 
@@ -216,6 +245,36 @@ Available endpoints:
 - `GET /tasks/status/<task_id>/` - Get task status
 - `POST /tasks/purge/` - Purge completed tasks
 
+These endpoints run tasks, expose their arguments and results, and delete task
+history, so they answer `403` until the backend says how to authenticate them.
+Override `get_auth_handler()` to open them. The handler returns `None` to let
+the request through, or a response to refuse it:
+
+```python
+from django.conf import settings
+from django.http import JsonResponse
+
+from django_tasks_redis.backends import RedisTaskBackend
+
+
+class MyTaskBackend(RedisTaskBackend):
+    def get_auth_handler(self):
+        def handler(request):
+            if request.headers.get("X-Task-Token") != settings.TASK_ENDPOINT_TOKEN:
+                return JsonResponse({"error": "Forbidden"}, status=403)
+            return None
+
+        return handler
+```
+
+Then point `BACKEND` at `myapp.backends.MyTaskBackend`. The endpoints are
+`csrf_exempt`, so the handler is the only thing standing between the caller and
+task execution: authenticate on something the caller has to prove, not on
+anything the request can claim about itself.
+
+`POST /tasks/run/` drains the whole queue in the request by default; pass
+`max_tasks` to bound it.
+
 ## Public API
 
 The `executor` module provides functions for programmatic task management:
@@ -235,6 +294,16 @@ count = executor.get_pending_task_count()
 
 # Purge completed tasks
 deleted = executor.purge_completed_tasks(days=7)
+```
+
+## Development
+
+The test suite needs a running Redis. It uses `redis://localhost:6379/0` by
+default; set `REDIS_URL` to point it somewhere else:
+
+```bash
+pip install -e ".[dev]"
+REDIS_URL=redis://localhost:6399/0 pytest tests/
 ```
 
 ## License
