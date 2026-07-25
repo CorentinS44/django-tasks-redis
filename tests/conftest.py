@@ -4,16 +4,28 @@ pytest configuration and fixtures for django-tasks-redis tests.
 
 import pytest
 import redis as redis_lib
+from django.conf import settings
 from django.tasks import task_backends
+from django.test import Client
+
+from tests.backends import TASK_ENDPOINT_TOKEN
+
+
+@pytest.fixture
+def auth_client():
+    """Test client carrying the token the endpoints of the test backend want."""
+    return Client(headers={"x-task-token": TASK_ENDPOINT_TOKEN})
 
 
 @pytest.fixture(scope="session")
 def redis_connection():
-    """Create a Redis connection for the test session."""
-    client = redis_lib.Redis(
-        host="localhost",
-        port=6379,
-        db=0,
+    """Create a Redis connection for the test session.
+
+    Derived from the configured backend so the suite never talks to a server
+    the settings do not point at.
+    """
+    client = redis_lib.Redis.from_url(
+        settings.TASKS["default"]["OPTIONS"]["REDIS_URL"],
         decode_responses=True,
     )
     yield client

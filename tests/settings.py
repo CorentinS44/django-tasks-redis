@@ -2,6 +2,12 @@
 Django settings for tests.
 """
 
+import os
+
+# Set REDIS_URL to run the suite against another server, e.g. a throwaway
+# container on a spare port instead of the developer's own Redis.
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
 SECRET_KEY = "test-secret-key-for-django-tasks-redis"
 
 DEBUG = True
@@ -49,15 +55,23 @@ USE_TZ = True
 
 TIME_ZONE = "UTC"
 
+REDIS_OPTIONS = {
+    "REDIS_URL": REDIS_URL,
+    "REDIS_KEY_PREFIX": "django_tasks_test",
+    "REDIS_RESULT_TTL": 3600,  # 1 hour for tests
+}
+
 TASKS = {
     "default": {
-        "BACKEND": "django_tasks_redis.RedisTaskBackend",
+        "BACKEND": "tests.backends.TokenAuthRedisTaskBackend",
         "QUEUES": [],  # Empty list = allow all queue names
-        "OPTIONS": {
-            "REDIS_URL": "redis://localhost:6379/0",
-            "REDIS_KEY_PREFIX": "django_tasks_test",
-            "REDIS_RESULT_TTL": 3600,  # 1 hour for tests
-        },
+        "OPTIONS": REDIS_OPTIONS,
+    },
+    # No authentication handler, so its HTTP endpoints stay closed.
+    "closed": {
+        "BACKEND": "django_tasks_redis.RedisTaskBackend",
+        "QUEUES": [],
+        "OPTIONS": REDIS_OPTIONS,
     },
 }
 
