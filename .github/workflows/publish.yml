@@ -17,8 +17,15 @@ jobs:
 
       - name: Install build dependencies
         run: |
+          sudo apt-get update && sudo apt-get install -y gettext
           python -m pip install --upgrade pip
-          pip install build
+          pip install build Django
+
+      # Only .po files are in the repository, and gettext reads .mo at runtime,
+      # so translations have to be compiled before the package is built.
+      - name: Compile translations
+        working-directory: django_tasks_redis
+        run: django-admin compilemessages
 
       - name: Build package
         run: python -m build

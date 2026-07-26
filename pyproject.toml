@@ -60,6 +60,16 @@ Issues = "https://github.com/tokibito/django-tasks-redis/issues"
 include = ["django_tasks_redis*"]
 exclude = ["tests*", "examples*"]
 
+# Without these the admin templates and the translations are dropped from the
+# built package, and the admin task detail page raises TemplateDoesNotExist on
+# every install that is not a source checkout.
+[tool.setuptools.package-data]
+django_tasks_redis = [
+    "templates/**/*.html",
+    "locale/*/LC_MESSAGES/*.po",
+    "locale/*/LC_MESSAGES/*.mo",
+]
+
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
 pythonpath = ["."]
