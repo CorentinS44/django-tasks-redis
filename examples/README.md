@@ -131,17 +131,21 @@ See `demo_app/tasks.py` for task definitions:
 ```python
 from django.tasks import task
 
+
 @task
 def add_numbers(x, y):
     return x + y
+
 
 @task(priority=10)
 def high_priority_task(message):
     return f"High priority: {message}"
 
+
 @task(queue_name="emails")
 def send_email(to, subject, body):
     return {"to": to, "subject": subject, "status": "sent"}
+
 
 @task(takes_context=True)
 def task_with_context(context, message):

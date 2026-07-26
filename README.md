@@ -105,6 +105,7 @@ TASKS = {
 ```python
 from django.tasks import task
 
+
 @task
 def send_email(to: str, subject: str, body: str):
     # Send email logic here
@@ -140,7 +141,6 @@ TASKS = {
             # "REDIS_DB": 0,
             # "REDIS_PASSWORD": None,
             # "REDIS_SSL": False,
-
             # Behavior settings
             "REDIS_RESULT_TTL": 604800,  # Result retention period (seconds), default 7 days
             "REDIS_KEY_PREFIX": "django_tasks",  # Redis key prefix
