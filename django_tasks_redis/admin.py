@@ -8,6 +8,7 @@ in the database, this uses a custom approach with executor API.
 
 from django.contrib import admin, messages
 from django.contrib.admin.views.main import ChangeList
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import models
 from django.shortcuts import render
@@ -70,18 +71,27 @@ class RedisTaskChangeList(ChangeList):
 
     def get_results(self, request):
         # Fetch tasks from Redis
-        page_num = int(request.GET.get("p", 0))
         per_page = self.list_per_page
+
+        # ChangeList already parsed a 1-indexed page number; reading "p" again
+        # as 0-indexed shifts every page by one.
+        offset = max(self.page_num - 1, 0) * per_page
 
         # Get status filter if any
         status_filter = request.GET.get("status")
 
-        tasks, total = executor.get_tasks(
-            backend_name="default",
-            status=status_filter,
-            offset=page_num * per_page,
-            limit=per_page,
-        )
+        if self.query:
+            # search_fields only holds task_id, and a task id is an exact key.
+            task_data = executor.get_task_by_id(self.query.strip())
+            tasks = [task_data] if task_data else []
+            total = len(tasks)
+        else:
+            tasks, total = executor.get_tasks(
+                backend_name="default",
+                status=status_filter,
+                offset=offset,
+                limit=per_page,
+            )
 
         # Get meta from the model
         meta = self.model._meta
@@ -133,13 +143,25 @@ class RedisTaskAdmin(admin.ModelAdmin):
         """Disable adding tasks from admin."""
         return False
 
-    def has_delete_permission(self, request, obj=None):
-        """Enable deleting tasks."""
-        return True
-
     def has_change_permission(self, request, obj=None):
         """Disable editing tasks (read-only view)."""
         return False
+
+    def has_run_permission(self, request):
+        """Running a task changes it, even though no edit form is rendered."""
+        return request.user.has_perm(
+            f"{self.opts.app_label}.change_{self.opts.model_name}"
+        )
+
+    def get_actions(self, request):
+        """Drop Django's built-in delete action.
+
+        It deletes from a queryset, and this ChangeList has none: it would
+        report success while deleting nothing.
+        """
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
 
     def get_urls(self):
         """Add custom URL for task detail view."""
@@ -168,6 +190,11 @@ class RedisTaskAdmin(admin.ModelAdmin):
 
     def task_detail_view(self, request, task_id):
         """Custom view for task details."""
+        # admin_view() only checks is_staff; the built-in views add the
+        # per-model check themselves.
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+
         task_data = executor.get_task_by_id(task_id)
 
         context = {
@@ -240,7 +267,7 @@ class RedisTaskAdmin(admin.ModelAdmin):
 
     get_enqueued_at.short_description = _("Enqueued At")
 
-    @admin.action(description=_("Run selected tasks"))
+    @admin.action(description=_("Run selected tasks"), permissions=["run"])
     def run_selected_tasks(self, request, queryset):
         """Execute selected tasks that are in READY status."""
         # Get task IDs from request
@@ -294,7 +321,7 @@ class RedisTaskAdmin(admin.ModelAdmin):
             messages.SUCCESS if fail_count == 0 else messages.WARNING,
         )
 
-    @admin.action(description=_("Retry failed tasks"))
+    @admin.action(description=_("Retry failed tasks"), permissions=["run"])
     def retry_failed_tasks(self, request, queryset):
         """Reset failed tasks to READY status and re-execute them."""
         selected = request.POST.getlist("_selected_action")
@@ -350,7 +377,7 @@ class RedisTaskAdmin(admin.ModelAdmin):
             messages.SUCCESS if fail_count == 0 else messages.WARNING,
         )
 
-    @admin.action(description=_("Delete selected tasks"))
+    @admin.action(description=_("Delete selected tasks"), permissions=["delete"])
     def delete_selected_tasks(self, request, queryset):
         """Delete selected tasks from Redis."""
         selected = request.POST.getlist("_selected_action")

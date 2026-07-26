@@ -192,9 +192,12 @@ Options:
 The package provides Django Admin integration for viewing and managing tasks:
 
 - View task list with status, priority, queue
-- Filter by status, queue, backend
-- Run selected tasks
-- Retry failed tasks
+- Search a task by id
+- Run selected tasks (requires the change permission)
+- Retry failed tasks (requires the change permission)
+- Delete tasks (requires the delete permission)
+
+The admin reads the `default` backend.
 
 ## HTTP Endpoints
 
