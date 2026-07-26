@@ -3,10 +3,13 @@ Utility functions for Redis connection and data handling.
 """
 
 import json
+import logging
 from datetime import datetime
 from typing import Any
 
 import redis
+
+logger = logging.getLogger("django_tasks_redis")
 
 
 def get_redis_client(options: dict) -> redis.Redis:
@@ -30,6 +33,11 @@ def get_redis_client(options: dict) -> redis.Redis:
     if "REDIS_URL" in options:
         url = options["REDIS_URL"]
         # SSL is determined by the URL scheme (rediss:// for SSL)
+        if ssl_ca_certs and not url.startswith("rediss://"):
+            logger.warning(
+                "REDIS_SSL_CA_CERTS is set but REDIS_URL is not a rediss:// URL; "
+                "the CA certificate will be ignored. Use a rediss:// URL to enable SSL."
+            )
         return redis.Redis.from_url(url, decode_responses=True, **connection_kwargs)
 
     host = options.get("REDIS_HOST", "localhost")
@@ -39,6 +47,11 @@ def get_redis_client(options: dict) -> redis.Redis:
     ssl = options.get("REDIS_SSL", False)
     if ssl:
         connection_kwargs["ssl"] = ssl
+    elif ssl_ca_certs:
+        logger.warning(
+            "REDIS_SSL_CA_CERTS is set but REDIS_SSL is not enabled; "
+            "the CA certificate will be ignored. Set REDIS_SSL=True to enable SSL."
+        )
 
     return redis.Redis(
         host=host,

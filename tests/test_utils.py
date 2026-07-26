@@ -176,6 +176,42 @@ class TestGetRedisClient:
         assert kwargs["ssl_ca_certs"] == "/path/to/ca.pem"
         assert kwargs["ssl"] is True
 
+    @mock.patch("django_tasks_redis.utils.redis")
+    def test_params_ca_certs_without_ssl_warns(self, mock_redis, caplog):
+        """Warn when ssl_ca_certs is set but REDIS_SSL is not enabled."""
+        with caplog.at_level("WARNING", logger="django_tasks_redis"):
+            get_redis_client(
+                {
+                    "REDIS_HOST": "localhost",
+                    "REDIS_SSL_CA_CERTS": "/path/to/ca.pem",
+                }
+            )
+        assert "REDIS_SSL_CA_CERTS is set but REDIS_SSL is not enabled" in caplog.text
+
+    @mock.patch("django_tasks_redis.utils.redis")
+    def test_url_ca_certs_without_rediss_warns(self, mock_redis, caplog):
+        """Warn when ssl_ca_certs is set but the URL is not rediss://."""
+        with caplog.at_level("WARNING", logger="django_tasks_redis"):
+            get_redis_client(
+                {
+                    "REDIS_URL": "redis://localhost:6379/0",
+                    "REDIS_SSL_CA_CERTS": "/path/to/ca.pem",
+                }
+            )
+        assert "is not a rediss:// URL" in caplog.text
+
+    @mock.patch("django_tasks_redis.utils.redis")
+    def test_url_rediss_with_ca_certs_no_warning(self, mock_redis, caplog):
+        """No warning when ssl_ca_certs is set with a rediss:// URL."""
+        with caplog.at_level("WARNING", logger="django_tasks_redis"):
+            get_redis_client(
+                {
+                    "REDIS_URL": "rediss://localhost:6379/0",
+                    "REDIS_SSL_CA_CERTS": "/path/to/ca.pem",
+                }
+            )
+        assert caplog.text == ""
+
 
 class TestPriorityToLevel:
     """Tests for priority to level conversion."""
