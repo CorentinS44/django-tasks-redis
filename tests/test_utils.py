@@ -3,12 +3,14 @@ Tests for utils module.
 """
 
 from datetime import UTC, datetime
+from unittest import mock
 
 from django_tasks_redis.utils import (
     deserialize_datetime,
     deserialize_json,
     get_delayed_key,
     get_priority_stream_key,
+    get_redis_client,
     get_result_key,
     get_results_index_key,
     get_stream_key,
@@ -124,6 +126,55 @@ class TestKeyGenerators:
         """Test results index key generation."""
         result = get_results_index_key("prefix", "backend")
         assert result == "prefix:backend:results_index"
+
+
+class TestGetRedisClient:
+    """Tests for Redis client construction from backend options."""
+
+    @mock.patch("django_tasks_redis.utils.redis")
+    def test_url_without_ca_certs(self, mock_redis):
+        """URL config does not pass ssl_ca_certs when unset."""
+        get_redis_client({"REDIS_URL": "redis://localhost:6379/0"})
+        mock_redis.Redis.from_url.assert_called_once_with(
+            "redis://localhost:6379/0", decode_responses=True
+        )
+
+    @mock.patch("django_tasks_redis.utils.redis")
+    def test_url_with_ca_certs(self, mock_redis):
+        """URL config passes ssl_ca_certs when REDIS_SSL_CA_CERTS is set."""
+        get_redis_client(
+            {
+                "REDIS_URL": "rediss://localhost:6379/0",
+                "REDIS_SSL_CA_CERTS": "/path/to/ca.pem",
+            }
+        )
+        mock_redis.Redis.from_url.assert_called_once_with(
+            "rediss://localhost:6379/0",
+            decode_responses=True,
+            ssl_ca_certs="/path/to/ca.pem",
+        )
+
+    @mock.patch("django_tasks_redis.utils.redis")
+    def test_params_without_ca_certs(self, mock_redis):
+        """Individual params config does not pass ssl_ca_certs when unset."""
+        get_redis_client({"REDIS_HOST": "localhost"})
+        _, kwargs = mock_redis.Redis.call_args
+        assert "ssl_ca_certs" not in kwargs
+        assert "ssl" not in kwargs
+
+    @mock.patch("django_tasks_redis.utils.redis")
+    def test_params_with_ca_certs(self, mock_redis):
+        """Individual params config passes ssl_ca_certs when set."""
+        get_redis_client(
+            {
+                "REDIS_HOST": "localhost",
+                "REDIS_SSL": True,
+                "REDIS_SSL_CA_CERTS": "/path/to/ca.pem",
+            }
+        )
+        _, kwargs = mock_redis.Redis.call_args
+        assert kwargs["ssl_ca_certs"] == "/path/to/ca.pem"
+        assert kwargs["ssl"] is True
 
 
 class TestPriorityToLevel:

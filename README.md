@@ -141,6 +141,7 @@ TASKS = {
             # "REDIS_DB": 0,
             # "REDIS_PASSWORD": None,
             # "REDIS_SSL": False,
+            # "REDIS_SSL_CA_CERTS": "/path/to/ca.pem",  # CA cert path for TLS (self-signed CA). Requires REDIS_SSL=True (or a rediss:// URL).
             # Behavior settings
             "REDIS_RESULT_TTL": 604800,  # Result retention period (seconds), default 7 days
             "REDIS_KEY_PREFIX": "django_tasks",  # Redis key prefix
