@@ -21,24 +21,32 @@ def get_redis_client(options: dict) -> redis.Redis:
     Returns:
         redis.Redis: Configured Redis client instance.
     """
+    # Add ssl_ca_certs only when REDIS_SSL_CA_CERTS is specified (self-signed CA).
+    connection_kwargs = {}
+    ssl_ca_certs = options.get("REDIS_SSL_CA_CERTS")
+    if ssl_ca_certs:
+        connection_kwargs["ssl_ca_certs"] = ssl_ca_certs
+
     if "REDIS_URL" in options:
         url = options["REDIS_URL"]
         # SSL is determined by the URL scheme (rediss:// for SSL)
-        return redis.Redis.from_url(url, decode_responses=True)
+        return redis.Redis.from_url(url, decode_responses=True, **connection_kwargs)
 
     host = options.get("REDIS_HOST", "localhost")
     port = options.get("REDIS_PORT", 6379)
     db = options.get("REDIS_DB", 0)
     password = options.get("REDIS_PASSWORD")
     ssl = options.get("REDIS_SSL", False)
+    if ssl:
+        connection_kwargs["ssl"] = ssl
 
     return redis.Redis(
         host=host,
         port=port,
         db=db,
         password=password,
-        ssl=ssl,
         decode_responses=True,
+        **connection_kwargs,
     )
 
 
