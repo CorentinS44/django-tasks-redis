@@ -143,7 +143,8 @@ TASKS = {
             # "REDIS_SSL": False,
             # "REDIS_SSL_CA_CERTS": "/path/to/ca.pem",  # CA cert path for TLS (self-signed CA). Requires REDIS_SSL=True (or a rediss:// URL).
             # Behavior settings
-            "REDIS_RESULT_TTL": 604800,  # Result retention period (seconds), default 7 days
+            "REDIS_RESULT_TTL": 2592000,  # Result retention period (seconds), default 30 days
+            "REDIS_COMPLETED_TASK_TTL": 2592000,  # Retention once finished, defaults to REDIS_RESULT_TTL
             "REDIS_KEY_PREFIX": "django_tasks",  # Redis key prefix
             "REDIS_CONSUMER_GROUP": "django_tasks_workers",  # Consumer group name
             "REDIS_CLAIM_TIMEOUT": 300,  # Stale message claim timeout (seconds)
@@ -168,9 +169,11 @@ Options:
   --continuous            Continuous mode (don't exit)
   --interval SECONDS      Polling interval (default: 1)
   --max-tasks N           Maximum tasks to process (0=unlimited)
-  --workers N             Number of worker threads (default: 1)
   --claim-interval SECS   Stale task claim interval (default: 60)
 ```
+
+A worker handles one task at a time. Run several processes to process more,
+each gets its own consumer in the group.
 
 ### purge_completed_redis_tasks
 
