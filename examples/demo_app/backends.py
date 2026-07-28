@@ -12,9 +12,7 @@ class TokenAuthRedisTaskBackend(RedisTaskBackend):
     """
     Opens the HTTP task endpoints to callers holding a shared secret.
 
-    The endpoints run and delete tasks, so they stay closed until a backend
-    says how to authenticate them. A real project would compare a signature
-    over request.body rather than a static token.
+    A real project would verify a signature over request.body instead.
     """
 
     def get_auth_handler(self):
