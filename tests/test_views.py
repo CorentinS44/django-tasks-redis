@@ -3,7 +3,9 @@ Tests for views module.
 """
 
 import pytest
-from django.test import Client
+from django.conf import settings
+from django.tasks import task_backends
+from django.test import Client, override_settings
 
 from django_tasks_redis import executor
 
@@ -44,6 +46,48 @@ class TestTaskEndpointAuth:
         response = auth_client.post("/tasks/run/", {"backend_name": "nope"})
 
         assert response.status_code == 400
+
+    def test_misconfigured_backend_does_not_look_like_a_typo(self, clean_redis):
+        broken = {
+            **settings.TASKS,
+            "broken": {
+                "BACKEND": "tests.backends.UnbuildableRedisTaskBackend",
+                "QUEUES": [],
+                "OPTIONS": {},
+            },
+        }
+
+        with override_settings(TASKS=broken), pytest.raises(RuntimeError):
+            Client().post("/tasks/run/", {"backend_name": "broken"})
+
+    @pytest.mark.parametrize(
+        ("data", "content_type"),
+        [
+            ({"max_tasks": "1"}, None),  # multipart, the test client default
+            ('{"max_tasks": 1}', "application/json"),
+            ("max_tasks=1", "application/x-www-form-urlencoded"),
+        ],
+    )
+    def test_auth_handler_can_read_the_request_body(
+        self, clean_redis, data, content_type
+    ):
+        """Reading POST parses a multipart stream and makes request.body raise."""
+        backend = task_backends["default"]
+        seen = {}
+
+        def handler(request):
+            seen["body"] = request.body
+            return None
+
+        backend.get_auth_handler = lambda: handler
+        try:
+            post = {} if content_type is None else {"content_type": content_type}
+            response = Client().post("/tasks/run/", data, **post)
+        finally:
+            del backend.get_auth_handler
+
+        assert response.status_code == 200
+        assert b"max_tasks" in seen["body"]
 
 
 @pytest.mark.django_db

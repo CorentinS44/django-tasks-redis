@@ -12,6 +12,7 @@ See RedisTaskBackend.get_auth_handler().
 
 from django.http import JsonResponse
 from django.tasks import task_backends
+from django.tasks.exceptions import InvalidTaskBackend
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
@@ -40,9 +41,14 @@ class TaskEndpointMixin:
         return request.GET.get("backend_name", "default")
 
     def dispatch(self, request, *args, **kwargs):
+        if request.method == "POST":
+            # Reading POST consumes the stream for a multipart body, so cache
+            # the raw body first: a handler verifying a signature needs it.
+            _ = request.body
+
         try:
             backend = task_backends[self.get_backend_name(request)]
-        except Exception:
+        except InvalidTaskBackend:
             return JsonResponse({"error": "Unknown backend"}, status=400)
 
         # A backend that is not a RedisTaskBackend has no handler, and is

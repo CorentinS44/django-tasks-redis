@@ -24,3 +24,8 @@ class TokenAuthRedisTaskBackend(RedisTaskBackend):
             return None
 
         return handler
+
+
+class UnbuildableRedisTaskBackend(RedisTaskBackend):
+    def __init__(self, alias, params):
+        raise RuntimeError("REDIS_URL is missing")
