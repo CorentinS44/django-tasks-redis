@@ -196,11 +196,26 @@ The package provides Django Admin integration for viewing and managing tasks:
 
 - View task list with status, priority, queue
 - Search a task by id
-- Run selected tasks (requires the change permission)
-- Retry failed tasks (requires the change permission)
-- Delete tasks (requires the delete permission)
+- Run selected tasks (requires `run_redistask`)
+- Retry failed tasks (requires `run_redistask`)
+- Delete tasks (requires `delete_redistask`)
 
 The admin reads the `default` backend.
+
+### Permissions
+
+Tasks live in Redis, so `RedisTask` is an unmanaged model with no table. It
+still takes a `migrate` run for its permissions to be created, after which they
+are granted like any other model's:
+
+| Permission | Grants |
+| --- | --- |
+| `view_redistask` | Read the task list and a task's detail page |
+| `run_redistask` | Run and retry tasks |
+| `delete_redistask` | Delete tasks from Redis |
+
+Tasks cannot be added or edited through the admin, so no `add` or `change`
+permission exists.
 
 ## HTTP Endpoints
 

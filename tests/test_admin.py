@@ -5,10 +5,12 @@ Tests for admin module.
 import pytest
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.test import Client, RequestFactory
 
 from django_tasks_redis import executor
-from django_tasks_redis.admin import RedisTask, RedisTaskAdmin, RedisTaskObject
+from django_tasks_redis.admin import RedisTaskAdmin, RedisTaskObject
+from django_tasks_redis.models import RedisTask
 
 
 @pytest.fixture
@@ -42,12 +44,7 @@ def admin_client(admin_user):
 
 @pytest.fixture
 def staff_user(db):
-    """Staff user without any task permission.
-
-    RedisTask is declared in admin.py, so the app has no models module and
-    Django creates no Permission rows for it: nothing can be granted, and this
-    is what every non-superuser staff account looks like.
-    """
+    """Staff user without any task permission."""
     User = get_user_model()
     return User.objects.create_user(
         username="staff",
@@ -63,6 +60,26 @@ def staff_client(staff_user):
     client = Client()
     client.force_login(staff_user)
     return client
+
+
+@pytest.fixture
+def grant():
+    """Grant task permissions to a user and return them with a fresh cache.
+
+    has_perm() caches its answers on the user instance, so a user handed back
+    from create_user() would keep saying no.
+    """
+
+    def _grant(user, *codenames):
+        perms = Permission.objects.filter(
+            content_type__app_label="django_tasks_redis",
+            codename__in=codenames,
+        )
+        assert len(perms) == len(codenames), f"unknown permission in {codenames}"
+        user.user_permissions.add(*perms)
+        return get_user_model().objects.get(pk=user.pk)
+
+    return _grant
 
 
 class TestRedisTaskObject:
@@ -131,7 +148,7 @@ class TestRedisTaskAdmin:
     def test_run_permission_follows_the_user(
         self, redis_task_admin, admin_user, staff_user
     ):
-        """Running tasks takes the change permission."""
+        """Running tasks takes the run permission."""
         request = RequestFactory().get("/")
 
         request.user = staff_user
@@ -155,6 +172,87 @@ class TestRedisTaskAdmin:
         request.user = admin_user
 
         assert "delete_selected" not in redis_task_admin.get_actions(request)
+
+
+@pytest.mark.django_db
+class TestRedisTaskPermissions:
+    """The permissions the admin checks have to exist to be grantable."""
+
+    def test_permissions_are_created_for_the_pseudo_model(self):
+        """RedisTask lives in models.py, so migrate creates its permissions."""
+        codenames = set(
+            Permission.objects.filter(
+                content_type__app_label="django_tasks_redis"
+            ).values_list("codename", flat=True)
+        )
+
+        assert codenames == {"view_redistask", "run_redistask", "delete_redistask"}
+
+    def test_no_permission_is_offered_for_what_the_admin_refuses(self):
+        """Tasks cannot be added or edited, so those permissions do not exist."""
+        codenames = set(
+            Permission.objects.filter(
+                content_type__app_label="django_tasks_redis"
+            ).values_list("codename", flat=True)
+        )
+
+        assert "add_redistask" not in codenames
+        assert "change_redistask" not in codenames
+
+    def test_view_permission_opens_the_changelist(self, staff_user, grant):
+        """A granted view permission is enough to read the task list."""
+        user = grant(staff_user, "view_redistask")
+        client = Client()
+        client.force_login(user)
+
+        response = client.get("/admin/django_tasks_redis/redistask/")
+
+        assert response.status_code == 200
+
+    def test_view_permission_opens_the_detail_view(
+        self, staff_user, grant, clean_redis
+    ):
+        from tests.tasks import simple_task
+
+        result = simple_task.enqueue(1, 2)
+        user = grant(staff_user, "view_redistask")
+        client = Client()
+        client.force_login(user)
+
+        response = client.get(
+            f"/admin/django_tasks_redis/redistask/{result.id}/detail/"
+        )
+
+        assert response.status_code == 200
+
+    def test_view_permission_alone_offers_no_actions(
+        self, redis_task_admin, staff_user, grant
+    ):
+        """Reading tasks does not imply running or deleting them."""
+        request = RequestFactory().get("/")
+        request.user = grant(staff_user, "view_redistask")
+
+        assert redis_task_admin.get_actions(request) == {}
+
+    def test_run_permission_offers_only_the_run_actions(
+        self, redis_task_admin, staff_user, grant
+    ):
+        request = RequestFactory().get("/")
+        request.user = grant(staff_user, "view_redistask", "run_redistask")
+
+        actions = redis_task_admin.get_actions(request)
+
+        assert set(actions) == {"run_selected_tasks", "retry_failed_tasks"}
+
+    def test_delete_permission_offers_only_the_delete_action(
+        self, redis_task_admin, staff_user, grant
+    ):
+        request = RequestFactory().get("/")
+        request.user = grant(staff_user, "view_redistask", "delete_redistask")
+
+        actions = redis_task_admin.get_actions(request)
+
+        assert set(actions) == {"delete_selected_tasks"}
 
     def test_id_short(self, redis_task_admin):
         """Test shortened ID display."""

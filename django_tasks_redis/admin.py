@@ -8,9 +8,9 @@ in the database, this uses a custom approach with executor API.
 
 from django.contrib import admin, messages
 from django.contrib.admin.views.main import ChangeList
+from django.contrib.auth import get_permission_codename
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db import models
 from django.shortcuts import render
 from django.tasks.base import TaskResultStatus
 from django.urls import path
@@ -18,6 +18,7 @@ from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
 from . import executor
+from .models import RedisTask
 
 
 class RedisTaskObject:
@@ -107,23 +108,6 @@ class RedisTaskChangeList(ChangeList):
         self.paginator = RedisTaskPaginator(self.result_list, per_page, total)
 
 
-class RedisTask(models.Model):
-    """
-    Pseudo-model for Redis tasks in Django Admin.
-
-    This model is not actually stored in the database.
-    It's used to provide a Django Admin interface for Redis tasks.
-    """
-
-    task_id = models.CharField(max_length=36, primary_key=True)
-
-    class Meta:
-        managed = False
-        app_label = "django_tasks_redis"
-        verbose_name = _("Redis Task")
-        verbose_name_plural = _("Redis Tasks")
-
-
 class RedisTaskAdmin(admin.ModelAdmin):
     """Admin interface for Redis tasks."""
 
@@ -148,10 +132,9 @@ class RedisTaskAdmin(admin.ModelAdmin):
         return False
 
     def has_run_permission(self, request):
-        """Running a task changes it, even though no edit form is rendered."""
-        return request.user.has_perm(
-            f"{self.opts.app_label}.change_{self.opts.model_name}"
-        )
+        """Running a task is its own capability, not an edit of a stored row."""
+        codename = get_permission_codename("run", self.opts)
+        return request.user.has_perm(f"{self.opts.app_label}.{codename}")
 
     def get_actions(self, request):
         """Drop Django's built-in delete action.

@@ -72,9 +72,30 @@ This will start a worker that continuously processes tasks from the queue.
 
 Login with your superuser credentials to:
 - View all tasks
-- Filter by status and queue
+- Search a task by id
 - Run selected tasks
 - Retry failed tasks
+- Delete tasks
+
+A superuser holds every permission, so everything above is available. To check
+the permissions themselves, create a staff account without them and grant them
+one at a time — `migrate` in step 3 created `view_redistask`, `run_redistask`
+and `delete_redistask`:
+
+```bash
+python manage.py shell -c "
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
+
+user = get_user_model().objects.create_user('viewer', password='viewer', is_staff=True)
+user.user_permissions.add(
+    Permission.objects.get(codename='view_redistask')
+)
+"
+```
+
+Logged in as `viewer`, the task list and the detail page open, and no action is
+offered in the changelist until `run_redistask` or `delete_redistask` is added.
 
 ### API Endpoints
 

@@ -16,13 +16,17 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: admin.py apps.py
+#: apps.py models.py
 msgid "Redis Tasks"
 msgstr "Redisタスク"
 
-#: admin.py
+#: models.py
 msgid "Redis Task"
 msgstr "Redisタスク"
+
+#: models.py
+msgid "Can run Redis task"
+msgstr "Redisタスクを実行できる"
 
 #: admin.py
 msgid "ID"
