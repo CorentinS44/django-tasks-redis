@@ -40,6 +40,31 @@ def admin_client(admin_user):
     return client
 
 
+@pytest.fixture
+def staff_user(db):
+    """Staff user without any task permission.
+
+    RedisTask is declared in admin.py, so the app has no models module and
+    Django creates no Permission rows for it: nothing can be granted, and this
+    is what every non-superuser staff account looks like.
+    """
+    User = get_user_model()
+    return User.objects.create_user(
+        username="staff",
+        email="staff@example.com",
+        password="password",
+        is_staff=True,
+    )
+
+
+@pytest.fixture
+def staff_client(staff_user):
+    """Logged-in client for a staff user with no task permission."""
+    client = Client()
+    client.force_login(staff_user)
+    return client
+
+
 class TestRedisTaskObject:
     """Tests for RedisTaskObject wrapper class."""
 
@@ -86,15 +111,50 @@ class TestRedisTaskAdmin:
         request = RequestFactory().get("/")
         assert redis_task_admin.has_add_permission(request) is False
 
-    def test_has_delete_permission(self, redis_task_admin):
-        """Test that delete permission is enabled."""
-        request = RequestFactory().get("/")
-        assert redis_task_admin.has_delete_permission(request) is True
-
     def test_has_change_permission(self, redis_task_admin):
         """Test that change permission is disabled."""
         request = RequestFactory().get("/")
         assert redis_task_admin.has_change_permission(request) is False
+
+    def test_delete_permission_follows_the_user(
+        self, redis_task_admin, admin_user, staff_user
+    ):
+        """Deleting tasks takes the delete permission, like any model."""
+        request = RequestFactory().get("/")
+
+        request.user = staff_user
+        assert redis_task_admin.has_delete_permission(request) is False
+
+        request.user = admin_user
+        assert redis_task_admin.has_delete_permission(request) is True
+
+    def test_run_permission_follows_the_user(
+        self, redis_task_admin, admin_user, staff_user
+    ):
+        """Running tasks takes the change permission."""
+        request = RequestFactory().get("/")
+
+        request.user = staff_user
+        assert redis_task_admin.has_run_permission(request) is False
+
+        request.user = admin_user
+        assert redis_task_admin.has_run_permission(request) is True
+
+    def test_unprivileged_staff_gets_no_destructive_actions(
+        self, redis_task_admin, staff_user
+    ):
+        """A staff user without task permissions cannot run or delete them."""
+        request = RequestFactory().get("/")
+        request.user = staff_user
+
+        assert redis_task_admin.get_actions(request) == {}
+
+    def test_builtin_delete_action_is_not_offered(self, redis_task_admin, admin_user):
+        """Django's queryset delete would report success while doing nothing."""
+        request = RequestFactory().get("/")
+        request.user = admin_user
+
+        assert "delete_selected" not in redis_task_admin.get_actions(request)
 
     def test_id_short(self, redis_task_admin):
         """Test shortened ID display."""
@@ -197,6 +257,18 @@ class TestRedisTaskAdminViews:
         )
         assert response.status_code == 200
         assert str(result.id) in response.content.decode()
+
+    def test_detail_view_requires_view_permission(self, staff_client, clean_redis):
+        """Being staff is not enough to read a task's arguments and errors."""
+        from tests.tasks import simple_task
+
+        result = simple_task.enqueue(1, 2)
+
+        response = staff_client.get(
+            f"/admin/django_tasks_redis/redistask/{result.id}/detail/"
+        )
+
+        assert response.status_code == 403
 
     def test_detail_view_not_found(self, admin_client, clean_redis):
         """Test task detail view for non-existent task."""
