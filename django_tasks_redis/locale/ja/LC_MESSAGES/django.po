@@ -16,16 +16,12 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: apps.py
+#: admin.py apps.py
 msgid "Redis Tasks"
 msgstr "Redisタスク"
 
 #: admin.py
 msgid "Redis Task"
-msgstr "Redisタスク"
-
-#: admin.py
-msgid "Redis Tasks"
 msgstr "Redisタスク"
 
 #: admin.py

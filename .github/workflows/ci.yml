@@ -95,3 +95,9 @@ jobs:
       - name: Run ruff format check
         run: |
           ruff format --check .
+
+      - name: Check translation catalogs
+        run: |
+          for po in $(find django_tasks_redis/locale -name '*.po'); do
+            msgfmt --check -o /dev/null "$po"
+          done
